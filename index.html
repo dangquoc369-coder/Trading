@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DangQuoc Tracker Pro</title>
+
+<!-- ===== PWA / "Thêm vào màn hình chính" - ẩn thanh Safari ===== -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DangQuoc Tracker">
+<meta name="theme-color" content="#131722">
+
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="manifest" href="manifest.json">
+
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- ===== SIDEBAR (dùng chung cho cả 4 pane) ===== -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <span class="logo-dot"></span>
+        <span class="logo-text">DQ Tracker <b>Pro</b></span>
+      </div>
+
+      <div class="symbol-search">
+        <input type="text" id="symbolSearchInput" placeholder="Tìm cặp giao dịch (áp dụng cho ô đang chọn)..." autocomplete="off">
+        <div id="symbolSearchResults" class="symbol-search-results hidden"></div>
+      </div>
+
+      <div class="sidebar-section-title">Phổ biến</div>
+      <ul id="symbolList" class="symbol-list"><!-- render bằng ui.js --></ul>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <main id="main">
+
+      <!-- Toolbar trên cùng: layout switcher + nút trạng thái thị trường + nút cảnh báo -->
+      <header id="topbar">
+        <div class="topbar-left">
+          <span class="topbar-title">Đa khung thời gian</span>
+        </div>
+
+        <div class="topbar-right">
+          <div id="layoutGroup" class="timeframe-group">
+            <!-- render bằng ui.js: nút số ô, tự đổi theo hướng màn hình -->
+          </div>
+          <!-- nút "Trạng thái thị trường" được marketstatus.js tự chèn vào đây -->
+          <!-- nút "🔔 Cảnh báo" được alerts.js tự chèn vào đây -->
+        </div>
+      </header>
+
+      <!-- Thanh điều khiển DÙNG CHUNG cho mọi ô -->
+      <div id="controlBar">
+        <span class="control-label">Khung giờ</span>
+        <div id="sharedTimeframeGroup" class="timeframe-group"></div>
+        <span class="control-label">Vẽ</span>
+        <div id="sharedDrawGroup" class="timeframe-group"></div>
+      </div>
+
+      <!-- Vùng chart: LUÔN có 4 pane cố định -->
+      <!-- CẬP NHẬT (đợt fix này): bỏ hẳn hàng <header class="pane-header"> riêng
+           phía trên mỗi ô (chiếm mất chiều cao chart). Symbol/giá/%/đếm ngược giờ
+           được đưa vào 1 lớp phủ (.pane-overlay-top) đè TRỰC TIẾP lên góc trên-trái
+           của chart, xếp chồng ngay trên khối chỉ báo (EMA/RSI/BUY-SELL) đã có sẵn -
+           giống cách TradingView làm. Nhờ vậy pane-chart-container là phần tử DUY
+           NHẤT còn nằm trong luồng flex của .chart-pane -> tự động chiếm toàn bộ
+           chiều cao còn lại, nến hiển thị cao/rộng hơn hẳn. -->
+
+      <div id="chartArea">
+
+        <section id="pane-1" class="chart-pane">
+          <div class="pane-chart-container" id="pane-1-container"></div>
+          <div class="pane-overlay-top">
+            <div class="pane-symbol-row">
+              <span id="pane-1-symbol" class="pane-symbol">BTCUSDT</span>
+              <span id="pane-1-price" class="price">--</span>
+              <span id="pane-1-change" class="change">--</span>
+              <span id="pane-1-countdown" class="candle-countdown">--:--</span>
+            </div>
+            <div id="pane-1-legend" class="pane-indicators"></div>
+          </div>
+          <div id="pane-1-status" class="connection-status connecting">Đang kết nối...</div>
+        </section>
+
+        <section id="pane-2" class="chart-pane">
+          <div class="pane-chart-container" id="pane-2-container"></div>
+          <div class="pane-overlay-top">
+            <div class="pane-symbol-row">
+              <span id="pane-2-symbol" class="pane-symbol">ETHUSDT</span>
+              <span id="pane-2-price" class="price">--</span>
+              <span id="pane-2-change" class="change">--</span>
+              <span id="pane-2-countdown" class="candle-countdown">--:--</span>
+            </div>
+            <div id="pane-2-legend" class="pane-indicators"></div>
+          </div>
+          <div id="pane-2-status" class="connection-status connecting">Đang kết nối...</div>
+        </section>
+
+        <section id="pane-3" class="chart-pane">
+          <div class="pane-chart-container" id="pane-3-container"></div>
+          <div class="pane-overlay-top">
+            <div class="pane-symbol-row">
+              <span id="pane-3-symbol" class="pane-symbol">BNBUSDT</span>
+              <span id="pane-3-price" class="price">--</span>
+              <span id="pane-3-change" class="change">--</span>
+              <span id="pane-3-countdown" class="candle-countdown">--:--</span>
+            </div>
+            <div id="pane-3-legend" class="pane-indicators"></div>
+          </div>
+          <div id="pane-3-status" class="connection-status connecting">Đang kết nối...</div>
+        </section>
+
+        <section id="pane-4" class="chart-pane">
+          <div class="pane-chart-container" id="pane-4-container"></div>
+          <div class="pane-overlay-top">
+            <div class="pane-symbol-row">
+              <span id="pane-4-symbol" class="pane-symbol">SOLUSDT</span>
+              <span id="pane-4-price" class="price">--</span>
+              <span id="pane-4-change" class="change">--</span>
+              <span id="pane-4-countdown" class="candle-countdown">--:--</span>
+            </div>
+            <div id="pane-4-legend" class="pane-indicators"></div>
+          </div>
+          <div id="pane-4-status" class="connection-status connecting">Đang kết nối...</div>
+        </section>
+
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- ===== SCRIPTS (thứ tự bắt buộc) ===== -->
+  <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/websocket.js"></script>
+  <script src="js/indicator.js"></script>
+  <script src="js/notifications.js"></script>
+  <script src="js/alerts.js"></script>
+  <script src="js/breakout.js"></script>
+  <script src="js/drawing.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/layout.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/marketstatus.js"></script>
+  <script src="js/indicator-legend.js"></script>
+  <script src="js/sidebar-resize.js"></script>
+  <script src="js/countdown.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
