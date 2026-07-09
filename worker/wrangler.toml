@@ -1,0 +1,23 @@
+name = "dq-tracker-push"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# Cần bật cờ này vì thư viện gửi push (@block65/webcrypto-web-push) có dùng
+# module "node:crypto" - nếu không bật, Worker có thể lỗi lúc chạy thật.
+compatibility_flags = ["nodejs_compat"]
+
+# Cron Trigger: chạy mỗi phút để kiểm tra giá và bắn push.
+[triggers]
+crons = ["*/1 * * * *"]
+
+# KV namespace lưu cảnh báo giá + push subscription (id lấy từ bước
+# `wrangler kv namespace create TRACKER_KV`).
+kv_namespaces = [
+  { binding = "TRACKER_KV", id = "715bce1c8d2043b58bb479a73772c39b" }
+]
+
+[vars]
+VAPID_SUBJECT = "mailto:quocngyendanght@gmail.com"
+# QUAN TRONG: dan DAY DU Public Key ban da tao o Buoc 2 vao day (dong duoi
+# dang bi cat ngan "..." - phai thay bang chuoi day du, khong duoc de "...").
+VAPID_PUBLIC_KEY = "BMPYU0iWPVAFCrpSJ9_vrwSH-ddQlSaUkezVpFmKFknLQu2vWn6BhNOexwlbc-liejgcSCBcLHrDb6Nc9qBUbPM"
