@@ -130,41 +130,42 @@ const BreakoutModule = (function () {
       return false;
     }
 
-    // ===================== TREND THAM KHẢO (logic cũ, giữ nguyên) =====================
-    function detectOwnTimeframeTrend(closedCandles, lookback = 3) {
+    // ===================== TREND THAM KHẢO (Breakout 3 nến trước) =====================
+function detectOwnTimeframeTrend(closedCandles) {
   const len = closedCandles.length;
-
-  if (len < lookback + 1) {
+  if (len < 4) {
     return {
       trend: 'sideway',
       breakDistance: 0,
-      maxHigh: null,
-      minLow: null
+      maxHigh123: null,
+      minLow123: null
     };
   }
 
-  const current = closedCandles[len - 1];
-  const previous = closedCandles.slice(len - 1 - lookback, len - 1);
+  const c1 = closedCandles[len - 1]; // nến vừa đóng
+  const c2 = closedCandles[len - 2];
+  const c3 = closedCandles[len - 3];
+  const c4 = closedCandles[len - 4];
 
-  const maxHigh = Math.max(...previous.map(c => c.high));
-  const minLow = Math.min(...previous.map(c => c.low));
+  const maxHigh123 = Math.max(c2.high, c3.high, c4.high);
+  const minLow123 = Math.min(c2.low, c3.low, c4.low);
 
   let trend = 'sideway';
   let breakDistance = 0;
 
-  if (current.close > maxHigh) {
+  if (c1.close > maxHigh123) {
     trend = 'up';
-    breakDistance = current.close - maxHigh;
-  } else if (current.close < minLow) {
+    breakDistance = c1.close - maxHigh123;
+  } else if (c1.close < minLow123) {
     trend = 'down';
-    breakDistance = minLow - current.close;
+    breakDistance = minLow123 - c1.close;
   }
 
   return {
     trend,
     breakDistance,
-    maxHigh,
-    minLow
+    maxHigh123,
+    minLow123
   };
 }
 
