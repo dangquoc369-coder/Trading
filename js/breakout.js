@@ -84,7 +84,7 @@ const BreakoutModule = (function () {
       if (!visible) return; // đang tắt hiển thị -> không vẽ đường SL
       slPriceLine = candleSeriesRef.createPriceLine({
         price,
-        color: '#f5c518',
+        color: '#e98d16ec',
         lineWidth: 1,
         lineStyle: LightweightCharts.LineStyle.Dashed,
         axisLabelVisible: true,
@@ -131,26 +131,42 @@ const BreakoutModule = (function () {
     }
 
     // ===================== TREND THAM KHẢO (logic cũ, giữ nguyên) =====================
-    function detectOwnTimeframeTrend(closedCandles) {
-      const len = closedCandles.length;
-      if (len < 3) return { trend: 'sideway', breakDistance: 0, maxHigh12: null, minLow12: null };
-      const c1 = closedCandles[len - 1];
-      const c2 = closedCandles[len - 2];
-      const c3 = closedCandles[len - 3];
-      const maxHigh12 = Math.max(c2.high, c3.high);
-      const minLow12 = Math.min(c2.low, c3.low);
+    function detectOwnTimeframeTrend(closedCandles, lookback = 3) {
+  const len = closedCandles.length;
 
-      let trend = 'sideway';
-      let breakDistance = 0;
-      if (c1.close > maxHigh12) {
-        trend = 'up';
-        breakDistance = c1.close - maxHigh12;
-      } else if (c1.close < minLow12) {
-        trend = 'down';
-        breakDistance = minLow12 - c1.close;
-      }
-      return { trend, breakDistance, maxHigh12, minLow12 };
-    }
+  if (len < lookback + 1) {
+    return {
+      trend: 'sideway',
+      breakDistance: 0,
+      maxHigh: null,
+      minLow: null
+    };
+  }
+
+  const current = closedCandles[len - 1];
+  const previous = closedCandles.slice(len - 1 - lookback, len - 1);
+
+  const maxHigh = Math.max(...previous.map(c => c.high));
+  const minLow = Math.min(...previous.map(c => c.low));
+
+  let trend = 'sideway';
+  let breakDistance = 0;
+
+  if (current.close > maxHigh) {
+    trend = 'up';
+    breakDistance = current.close - maxHigh;
+  } else if (current.close < minLow) {
+    trend = 'down';
+    breakDistance = minLow - current.close;
+  }
+
+  return {
+    trend,
+    breakDistance,
+    maxHigh,
+    minLow
+  };
+}
 
     // ===================== TIỆN ÍCH GHÉP KHUNG (multi-timeframe align) =====================
     function buildClosedSeries(rawCandles) {
