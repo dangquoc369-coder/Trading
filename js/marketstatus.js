@@ -2,11 +2,17 @@
  * marketstatus.js
  * Nút "Trạng thái thị trường" - CHỈ 1 NÚT DUY NHẤT dùng chung cho cả 4 pane.
  *
- * CẬP NHẬT (đợt fix này): getMarketStatus giờ nhận { entryCandles, higherTFCandles }
+ * CẬP NHẬT (đợt fix trước): getMarketStatus nhận { entryCandles, higherTFCandles }
  * thay vì 1 mảng candles - lấy thêm higherTFCandles từ instance.getHigherTFCandles()
- * (xem chart.js). Bổ sung hiển thị "vùng breakout thật" (crossTF) - đây mới là
- * vùng dùng để vào lệnh ảo, khác với "trend tham khảo" (vẫn tính theo khung
- * entry như logic cũ, không lọc lệnh).
+ * (xem chart.js). Bổ sung hiển thị "vùng breakout thật" (crossTF).
+ *
+ * CẬP NHẬT (đợt fix này - GIAO DIỆN CHUYÊN NGHIỆP + NỀN SÁNG):
+ *   - Bỏ hẳn injectStyles() (từng chèn 1 thẻ <style> với màu HEX CỨNG như
+ *     #1e222d/#d1d4dc...) - đây chính là lý do panel này "kẹt cứng" ở giao
+ *     diện tối, không đổi theo khi bật nền sáng (theme.js chỉ đổi biến CSS,
+ *     không đụng được vào CSS hardcode). Giờ panel + nút dùng chung class
+ *     .ms-panel/.topbar-btn (định nghĩa trong css/style.css bằng biến CSS)
+ *     - tự động đổi màu đúng theo theme hiện tại, không cần code gì thêm.
  */
 
 (function () {
@@ -27,7 +33,6 @@
       return `<div class="ms-row ms-muted">${status.reason}</div>`;
     }
 
-    // Trend tham khảo (logic cũ, KHÔNG lọc lệnh) - giữ nguyên hiển thị như trước
     let trendHTML = '';
     if (status.trend === 'up') {
       trendHTML = `
@@ -47,7 +52,6 @@
       }
     }
 
-    // Vùng breakout THẬT (khung trend lớn hơn) - đây mới là vùng quyết định vào lệnh ảo
     let crossTFHTML = '';
     if (status.crossTF) {
       crossTFHTML = `
@@ -88,58 +92,10 @@
     `;
   }
 
-  function injectStyles() {
-    if (document.getElementById('marketStatusStyles')) return;
-    const style = document.createElement('style');
-    style.id = 'marketStatusStyles';
-    style.textContent = `
-      #marketStatusBtn {
-        background: #1e222d;
-        color: #d1d4dc;
-        border: 1px solid #2a2e39;
-        border-radius: 6px;
-        padding: 6px 12px;
-        font-size: 13px;
-        cursor: pointer;
-        margin-left: 12px;
-      }
-      #marketStatusBtn:hover { background: #2a2e39; }
-      #marketStatusPanel {
-        position: fixed;
-        top: 60px;
-        right: 20px;
-        width: 300px;
-        max-width: calc(100vw - 24px);
-        background: #131722;
-        border: 1px solid #2a2e39;
-        border-radius: 8px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-        color: #d1d4dc;
-        font-size: 13px;
-        z-index: 9999;
-        padding: 14px 16px;
-        display: none;
-      }
-      #marketStatusPanel.open { display: block; }
-      #marketStatusPanel .ms-header {
-        display: flex; justify-content: space-between; align-items: center;
-        margin-bottom: 10px; font-weight: 600; color: #fff;
-      }
-      #marketStatusPanel .ms-close { cursor: pointer; color: #787b86; font-size: 16px; line-height: 1; }
-      #marketStatusPanel .ms-row { margin-bottom: 6px; line-height: 1.4; }
-      #marketStatusPanel .ms-muted { color: #9aa0aa; font-size: 12px; }
-      #marketStatusPanel .ms-bold { font-weight: 600; color: #fff; }
-      #marketStatusPanel .ms-trend-up { color: #26a69a; font-weight: 600; }
-      #marketStatusPanel .ms-trend-down { color: #ef5350; font-weight: 600; }
-      #marketStatusPanel .ms-trend-side { color: #f5c518; font-weight: 600; }
-      #marketStatusPanel .ms-divider { border-top: 1px solid #2a2e39; margin: 10px 0; }
-    `;
-    document.head.appendChild(style);
-  }
-
   function createPanel() {
     const panel = document.createElement('div');
     panel.id = 'marketStatusPanel';
+    panel.className = 'ms-panel';
     panel.innerHTML = `
       <div class="ms-header">
         <span>📊 Trạng thái thị trường</span>
@@ -158,7 +114,6 @@
       const activePane = Store.getActivePane();
       const instance = window.PaneRegistry.get(activePane.id);
       const entryCandles = instance.getCandles();
-      // higherTFCandles có thể chưa tồn tại nếu app.js chưa fetch/gán -> mảng rỗng
       const higherTFCandles = typeof instance.getHigherTFCandles === 'function' ? instance.getHigherTFCandles() : [];
       const status = instance.getBreakout().getMarketStatus({ entryCandles, higherTFCandles });
       const paneLabel = `Pane đang xem: ${activePane.symbol} (${activePane.timeframe})`;
@@ -173,6 +128,7 @@
   function createButton(panel) {
     const btn = document.createElement('button');
     btn.id = 'marketStatusBtn';
+    btn.className = 'topbar-btn';
     btn.type = 'button';
     btn.textContent = '📊 Trạng thái thị trường';
     btn.addEventListener('click', () => {
@@ -192,7 +148,6 @@
   }
 
   function mount() {
-    injectStyles();
     const panel = createPanel();
     const btn = createButton(panel);
     bindAutoRefreshOnFocusChange(panel);

@@ -6,6 +6,12 @@
  * giá + quyết định báo hay không" giờ chạy trên server (Cron Trigger), không
  * còn phụ thuộc vào việc tab có đang mở hay không như AlertsModule cũ.
  *
+ * ĐÃ BỎ phần breakout (server-side BUY/SELL signal) để giảm số lượt đọc/ghi
+ * Workers KV - tài khoản đã chạm 90% giới hạn free tier. Nếu vẫn còn chạm
+ * giới hạn sau khi bỏ breakout, khả năng cao là do phía client gọi
+ * /api/alerts quá thường xuyên (mỗi lần gọi tốn 1 read + có thể 1 write) -
+ * nên kiểm tra lại tần suất client đồng bộ.
+ *
  * 3 endpoint HTTP:
  *   GET  /api/vapid-public-key  -> trả VAPID public key cho client dùng khi
  *                                  subscribe PushManager.
@@ -15,13 +21,7 @@
  *
  * 1 cron handler (scheduled), cấu hình chạy MỖI PHÚT trong wrangler.toml:
  *   - Gom toàn bộ symbol đang cần theo dõi từ MỌI thiết bị (loại trùng).
- *   - Gọi 1 lần API Bybit để lấy giá hiện tại của TOÀN BỘ symbol spot, rồi
- *     lọc ra những symbol đang cần (Bybit v5 không hỗ trợ lọc nhiều symbol
- *     trong 1 request nên lấy hết 1 lần là cách tiết kiệm subrequest nhất).
- *     Lưu ý: đổi từ Binance sang Bybit vì Cloudflare Workers chạy trên IP
- *     bị Binance chặn theo vùng (lỗi 451 "restricted location") - Bybit
- *     không chặn và dùng chung định dạng ký hiệu (vd: BTCUSDT) nên không
- *     cần đổi gì ở phía client/app.
+ *   - Gọi 1 lần API CoinGecko để lấy giá hiện tại của các symbol cần theo dõi.
  *   - Với mỗi cảnh báo CHƯA triggered: so "phía" hiện tại (trên/dưới mức
  *     cảnh báo) với "phía" đã lưu lần trước - đổi phía = vừa "vượt qua" mức
  *     cảnh báo -> gửi Web Push + đánh dấu triggered (giống hệt logic
@@ -32,18 +32,15 @@
  *
  * LƯU Ý VỀ GIỚI HẠN FREE TIER CỦA WORKERS KV:
  *   - Free tier: ~100.000 lượt đọc/ngày, ~1.000 lượt ghi/ngày.
- *   - Thiết kế ở đây CHỈ ĐỌC mỗi lần cron chạy (1440 lần/ngày nếu mỗi phút),
- *     và CHỈ GHI khi có thay đổi thật (alert vừa được tạo lần đầu hoặc vừa
- *     triggered) - không ghi mỗi tick - nên gần như không thể chạm giới hạn
- *     ghi ở quy mô dùng cá nhân.
+ *   - Thiết kế ở đây CHỈ ĐỌC mỗi lần cron chạy (2880 lần/ngày vì chạy 2
+ *     lần/phút), và CHỈ GHI khi có thay đổi thật (alert vừa được tạo lần
+ *     đầu hoặc vừa triggered) - không ghi mỗi tick.
  */
 
 import { buildPushPayload } from '@block65/webcrypto-web-push';
 
 const ALERTS_KEY = 'alerts_v1'; // { [deviceId]: [{id, symbol, price, side, triggered}] }
 const SUBS_KEY = 'subs_v1'; // { [deviceId]: PushSubscriptionJSON }
-const BREAKOUT_CONFIGS_KEY = 'breakout_configs_v1'; // { [deviceId]: {symbol, entryInterval, higherInterval, slSource, slInterval, atrPeriod, atrMultiplier, lookbackCandles} }
-const BREAKOUT_STATE_KEY = 'breakout_state_v1'; // { [deviceId]: {lastNotifiedEntryTime, hasBaseline} }
 
 function withCors(resp) {
   resp.headers.set('Access-Control-Allow-Origin', '*');
@@ -135,107 +132,13 @@ export default {
       return withCors(Response.json({ ok: true, count: merged.length }));
     }
 
-    if (url.pathname === '/api/breakout-config' && request.method === 'POST') {
-      let body;
-      try {
-        body = await request.json();
-      } catch (err) {
-        return withCors(new Response('JSON không hợp lệ', { status: 400 }));
-      }
-      const { deviceId, config } = body || {};
-      if (!deviceId) {
-        return withCors(new Response('Thiếu deviceId', { status: 400 }));
-      }
-
-      const configs = await readJSON(env.TRACKER_KV, BREAKOUT_CONFIGS_KEY, {});
-      const states = await readJSON(env.TRACKER_KV, BREAKOUT_STATE_KEY, {});
-
-      if (!config) {
-        // config rỗng/null = thiết bị này tắt theo dõi breakout
-        delete configs[deviceId];
-        delete states[deviceId];
-      } else {
-        if (!config.symbol || !config.entryInterval || !config.higherInterval) {
-          return withCors(new Response('Config thiếu symbol/entryInterval/higherInterval', { status: 400 }));
-        }
-        // Chuẩn hoá + áp default giống CONFIG mặc định trong breakout.js gốc.
-        const normalized = {
-          symbol: config.symbol,
-          entryInterval: config.entryInterval, // vd '15m' - phải là interval hợp lệ của MEXC
-          higherInterval: config.higherInterval, // khung TREND lớn hơn, vd '1h'
-          slSource: config.slSource || 'entry', // 'entry' | 'higher' | 'custom'
-          slInterval: config.slInterval || null, // chỉ cần khi slSource = 'custom'
-          atrPeriod: config.atrPeriod || 14,
-          atrMultiplier: config.atrMultiplier || 2.5,
-          lookbackCandles: config.lookbackCandles || 2,
-        };
-
-        const prev = configs[deviceId];
-        const changed = !prev || JSON.stringify(prev) !== JSON.stringify(normalized);
-        configs[deviceId] = normalized;
-
-        if (changed) {
-          // Đổi cấu hình = 1 "phiên" tính toán mới, giống resetRunState() ở
-          // client - reset baseline để không báo nhầm tín hiệu cũ.
-          states[deviceId] = { lastNotifiedEntryTime: null, hasBaseline: false };
-        }
-      }
-
-      await writeJSON(env.TRACKER_KV, BREAKOUT_CONFIGS_KEY, configs);
-      await writeJSON(env.TRACKER_KV, BREAKOUT_STATE_KEY, states);
-      return withCors(Response.json({ ok: true }));
-    }
-
-    if (url.pathname === '/api/debug-breakout' && request.method === 'GET') {
-      const config = {
-        symbol: url.searchParams.get('symbol'),
-        entryInterval: url.searchParams.get('entryInterval'),
-        higherInterval: url.searchParams.get('higherInterval'),
-        slSource: url.searchParams.get('slSource') || 'entry',
-        slInterval: url.searchParams.get('slInterval') || null,
-        atrPeriod: Number(url.searchParams.get('atrPeriod')) || 14,
-        atrMultiplier: Number(url.searchParams.get('atrMultiplier')) || 2.5,
-        lookbackCandles: Number(url.searchParams.get('lookbackCandles')) || 2,
-      };
-      if (!config.symbol || !config.entryInterval || !config.higherInterval) {
-        return withCors(
-          new Response('Thiếu query param: cần symbol, entryInterval, higherInterval', { status: 400 })
-        );
-      }
-      try {
-        const result = await evaluateBreakoutForDevice(config);
-        return withCors(
-          Response.json({
-            config,
-            ...result,
-            signalTimeReadable: result.signal ? new Date(result.signal.time).toISOString() : null,
-            latestClosedTimeReadable: result.latestClosedTime ? new Date(result.latestClosedTime).toISOString() : null,
-          })
-        );
-      } catch (err) {
-        return withCors(Response.json({ error: err.message }, { status: 500 }));
-      }
-    }
-
-    if (url.pathname === '/api/test-klines' && request.method === 'GET') {
-      return withCors(Response.json(await testKlineSources()));
-    }
-
     return withCors(new Response('Not found', { status: 404 }));
   },
 
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(handleScheduled(env));
+    ctx.waitUntil(runTwicePerMinute(env));
   },
 };
-
-async function handleScheduled(env) {
-  // Tín hiệu breakout chỉ đổi khi 1 cây nến ĐÓNG - không cần sát tới 30s,
-  // nên chỉ chạy 1 lần/phút (tiết kiệm số lần gọi MEXC).
-  await checkBreakoutsAndNotify(env);
-  // Giá thì cần sát hơn nên vẫn chạy 2 lần/phút (đầu phút + +30s).
-  await runTwicePerMinute(env);
-}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -453,262 +356,6 @@ async function fetchCoinGeckoPrices(env, symbols) {
   return map;
 }
 
-/**
- * ===================== BREAKOUT SIGNAL (server-side) =====================
- * Port lại phần "vào lệnh ảo" của BreakoutModule.run() (breakout.js) để chạy
- * trên Worker, không phụ thuộc tab/app có mở hay không. Bỏ hết phần vẽ
- * chart/marker (không cần trên server), chỉ giữ đúng phần quyết định có
- * tín hiệu BUY/SELL MỚI hay không - cùng cơ chế "baseline" + chống báo lặp
- * y hệt bản gốc (setOnNewSignal/hasBaseline/lastNotifiedEntryTime), chỉ khác
- * là lưu ở KV thay vì biến trong closure vì server không có state sống giữa
- * các lần cron.
- *
- * Do server không giữ được "activeTradeOpen" liên tục giữa các lần cron như
- * client (client giữ trong closure suốt vòng đời app), ở đây mỗi lần cron sẽ
- * CHẠY LẠI TOÀN BỘ mô phỏng từ đầu lịch sử nến đang có (giống hệt việc
- * run() luôn resetRunState() rồi replay lại từ đầu mỗi lần được gọi) - vẫn
- * cho kết quả đúng, chỉ tốn thêm chút CPU vì phải replay, chấp nhận được ở
- * quy mô vài chục-vài trăm nến/lần.
- */
-
-async function checkBreakoutsAndNotify(env) {
-  const configs = await readJSON(env.TRACKER_KV, BREAKOUT_CONFIGS_KEY, {});
-  const deviceIds = Object.keys(configs);
-  if (deviceIds.length === 0) return;
-
-  const states = await readJSON(env.TRACKER_KV, BREAKOUT_STATE_KEY, {});
-  const subs = await readJSON(env.TRACKER_KV, SUBS_KEY, {});
-  let statesChanged = false;
-
-  for (const deviceId of deviceIds) {
-    const config = configs[deviceId];
-    let result;
-    try {
-      result = await evaluateBreakoutForDevice(config);
-    } catch (err) {
-      console.log(`[cron][breakout] lỗi xử lý ${deviceId}/${config.symbol}:`, err.message);
-      continue;
-    }
-    if (!result.ok) continue; // thiếu dữ liệu/lỗi fetch - bỏ qua tick này, thử lại lần sau
-
-    const state = states[deviceId] || { lastNotifiedEntryTime: null, hasBaseline: false };
-
-    if (result.signal && result.signal.time === result.latestClosedTime) {
-      const isNewSignal = result.signal.time !== state.lastNotifiedEntryTime;
-      const isFirstRunOfThisSession = !state.hasBaseline;
-
-      if (isNewSignal && !isFirstRunOfThisSession) {
-        const subscription = subs[deviceId];
-        const dirLabel = result.signal.direction === 1 ? 'BUY' : 'SELL';
-        console.log(
-          `[cron][breakout] TÍN HIỆU MỚI ${deviceId}/${config.symbol}/${config.entryInterval}: ${dirLabel}, có subscription=${!!subscription}`
-        );
-        if (subscription) {
-          await sendPush(env, subscription, {
-            title: result.signal.direction === 1 ? '📈 Tín hiệu BUY' : '📉 Tín hiệu SELL',
-            body: `${config.symbol} (${config.entryInterval}) vừa xuất hiện tín hiệu ${dirLabel}`,
-          });
-        }
-      }
-      if (isNewSignal) {
-        state.lastNotifiedEntryTime = result.signal.time;
-        statesChanged = true;
-      }
-    }
-
-    if (!state.hasBaseline) {
-      state.hasBaseline = true;
-      statesChanged = true;
-    }
-    states[deviceId] = state;
-  }
-
-  if (statesChanged) await writeJSON(env.TRACKER_KV, BREAKOUT_STATE_KEY, states);
-}
-
-/**
- * Lấy nến + replay mô phỏng cho 1 device, trả về:
- *  - ok: false nếu thiếu dữ liệu/lỗi fetch (bỏ qua tick này, không đổi state)
- *  - signal: tín hiệu BUY/SELL cuối cùng phát hiện được trong lịch sử hiện
- *    có (null nếu không có), kèm .time là thời điểm nến entry lúc phát tín hiệu
- *  - latestClosedTime: thời điểm nến entry ĐÃ ĐÓNG gần nhất hiện có
- */
-async function evaluateBreakoutForDevice(config) {
-  const entryLimit = Math.max(config.lookbackCandles + 5, config.atrPeriod + 20, 60);
-  const entry = await fetchMexcKlines(config.symbol, config.entryInterval, entryLimit);
-  if (!entry || entry.length < 2) return { ok: false };
-
-  const higherLimit = Math.max(config.lookbackCandles + 5, 20);
-  const higher = await fetchMexcKlines(config.symbol, config.higherInterval, higherLimit);
-  if (!higher || higher.length < config.lookbackCandles) return { ok: false };
-
-  let slSeries;
-  if (config.slSource === 'higher') {
-    slSeries = higher;
-  } else if (config.slSource === 'custom' && config.slInterval) {
-    const slCandles = await fetchMexcKlines(config.symbol, config.slInterval, config.atrPeriod + 30);
-    if (!slCandles) return { ok: false };
-    slSeries = slCandles;
-  } else {
-    slSeries = entry.slice(0, -1); // 'entry' mặc định - dùng nến entry đã đóng
-  }
-
-  const entryClosed = entry.slice(0, -1);
-  if (entryClosed.length < 1) return { ok: false };
-
-  const signal = runBreakoutSimulation(entryClosed, higher, slSeries, config);
-  return { ok: true, signal, latestClosedTime: entryClosed[entryClosed.length - 1].time };
-}
-
-/** Mô phỏng lại đúng phần vòng lặp chính trong BreakoutModule.run() (breakout.js gốc). */
-function runBreakoutSimulation(entryClosed, htfSeries, slSeries, config) {
-  let activeTradeOpen = false;
-  let activeDirection = 0;
-  let activeSLPrice = 0;
-
-  const htfAlign = makeKlineAligner(htfSeries);
-  const slAlign = makeKlineAligner(slSeries);
-  let lastLoopSignal = null;
-
-  for (let i = 0; i < entryClosed.length; i++) {
-    const bar = entryClosed[i];
-
-    if (activeTradeOpen) {
-      const slHit = activeDirection === 1 ? bar.low <= activeSLPrice : bar.high >= activeSLPrice;
-      if (slHit) activeTradeOpen = false;
-    }
-
-    const htfCount = htfAlign(bar.time);
-    if (htfCount < config.lookbackCandles) continue;
-    const windowCandles = htfSeries.slice(htfCount - config.lookbackCandles, htfCount);
-    const maxHigh = Math.max(...windowCandles.map((c) => c.high));
-    const minLow = Math.min(...windowCandles.map((c) => c.low));
-
-    let direction = 0;
-    if (bar.close > maxHigh) direction = 1;
-    else if (bar.close < minLow) direction = -1;
-    if (direction === 0) continue;
-    if (activeTradeOpen && direction === activeDirection) continue;
-
-    const slCount = slAlign(bar.time);
-    if (slCount < config.atrPeriod + 1) continue;
-    const atr = calcATRLast(slSeries.slice(0, slCount), config.atrPeriod);
-    if (!atr) continue;
-    const slDistance = atr * config.atrMultiplier;
-
-    activeTradeOpen = true;
-    activeDirection = direction;
-    activeSLPrice = direction === 1 ? bar.close - slDistance : bar.close + slDistance;
-
-    lastLoopSignal = { time: bar.time, direction };
-  }
-
-  return lastLoopSignal;
-}
-
-/** Giống makeAligner() trong breakout.js gốc - dò xem đã có bao nhiêu nến của 1 chuỗi đã "đóng" tính đến 1 mốc thời gian. */
-function makeKlineAligner(series) {
-  let pointer = 0;
-  return function advanceTo(time) {
-    while (pointer < series.length && series[pointer].closeTime <= time) pointer++;
-    return pointer;
-  };
-}
-
-/** Port thu gọn calcATR() trong indicator.js - chỉ trả về giá trị ATR CUỐI của lát cắt truyền vào. */
-function calcATRLast(candles, period) {
-  const n = candles.length;
-  if (n <= period) return null;
-
-  const tr = new Array(n).fill(null);
-  for (let i = 0; i < n; i++) {
-    if (i === 0) {
-      tr[i] = candles[i].high - candles[i].low;
-      continue;
-    }
-    const highLow = candles[i].high - candles[i].low;
-    const highClosePrev = Math.abs(candles[i].high - candles[i - 1].close);
-    const lowClosePrev = Math.abs(candles[i].low - candles[i - 1].close);
-    tr[i] = Math.max(highLow, highClosePrev, lowClosePrev);
-  }
-
-  let sum = 0;
-  for (let i = 1; i <= period; i++) sum += tr[i];
-  let atrPrev = sum / period;
-  for (let i = period + 1; i < n; i++) {
-    atrPrev = (atrPrev * (period - 1) + tr[i]) / period;
-  }
-  return atrPrev;
-}
-
-/**
- * Lấy nến (kline) từ MEXC - API gần như y hệt Binance (cùng tham số
- * symbol/interval, cùng cấu trúc mảng) nên port từ breakout.js sang gần
- * như không đổi logic tính toán, chỉ đổi nguồn fetch.
- * interval phải là chuỗi hợp lệ của MEXC, vd: 1m, 5m, 15m, 30m, 60m, 4h, 1d.
- */
-async function fetchMexcKlines(symbol, interval, limit) {
-  const targetUrl = `https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
-  let res;
-  try {
-    res = await fetch(targetUrl, {
-      headers: { 'User-Agent': 'dq-tracker-push/1.0 (breakout kline fetch)' },
-    });
-  } catch (err) {
-    console.log(`[cron][breakout] fetch MEXC klines ném lỗi (${symbol}/${interval}):`, err.message);
-    return null;
-  }
-  if (!res.ok) {
-    console.log(`[cron][breakout] MEXC klines trả lỗi HTTP ${res.status} cho ${symbol}/${interval}`);
-    return null;
-  }
-  const data = await res.json();
-  if (!Array.isArray(data)) return null;
-
-  return data
-    .map((k) => ({
-      time: k[0],
-      open: parseFloat(k[1]),
-      high: parseFloat(k[2]),
-      low: parseFloat(k[3]),
-      close: parseFloat(k[4]),
-      closeTime: k[6],
-    }))
-    .sort((a, b) => a.time - b.time);
-}
-
-/**
- * Endpoint chẩn đoán TẠM THỜI (dùng để quyết định nguồn nến cho tính năng
- * báo BUY/SELL server-side) - gọi GET /api/test-klines để xem nguồn nến
- * nào KHÔNG bị chặn từ IP của Cloudflare Workers. Test song song vài API
- * phổ biến, mỗi cái xin 2 cây nến 1 phút của BTC/USDT.
- * Sau khi chọn được nguồn ổn định, có thể xoá endpoint này đi.
- */
-async function testKlineSources() {
-  const attempts = [
-    { name: 'binance', url: 'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=2' },
-    { name: 'mexc', url: 'https://api.mexc.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=2' },
-    { name: 'okx', url: 'https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1m&limit=2' },
-    { name: 'bybit', url: 'https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=1&limit=2' },
-    { name: 'kraken', url: 'https://api.kraken.com/0/public/OHLC?pair=XBTUSDT&interval=1' },
-  ];
-
-  const results = {};
-  await Promise.all(
-    attempts.map(async ({ name, url: srcUrl }) => {
-      try {
-        const res = await fetch(srcUrl, {
-          headers: { 'User-Agent': 'dq-tracker-push/1.0 (kline source test)' },
-        });
-        const bodyText = await res.text().catch(() => '');
-        results[name] = { status: res.status, ok: res.ok, bodyPreview: bodyText.slice(0, 200) };
-      } catch (err) {
-        results[name] = { error: err.message };
-      }
-    })
-  );
-  return results;
-}
 async function sendPush(env, subscription, { title, body }) {
   try {
     const vapid = {

@@ -15,6 +15,23 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="manifest" href="manifest.json">
 
+<!-- ===== CHỐNG "NHÁY" THEME (đợt fix này) =====
+     Đọc lựa chọn nền sáng/tối đã lưu và đặt data-theme lên <html> NGAY LẬP
+     TỨC, TRƯỚC khi style.css tải xong và trang vẽ ra - tránh việc trang
+     luôn hiện nền tối mặc định trong 1 nhịp rồi mới "nháy" sang nền sáng.
+     theme.js (script cuối) chỉ cần đọc lại đúng giá trị này để đồng bộ nút
+     bấm, không set lại attribute nữa. -->
+<script>
+  (function () {
+    try {
+      var saved = localStorage.getItem('dq_tracker_theme_v1');
+      document.documentElement.setAttribute('data-theme', saved === 'light' ? 'light' : 'dark');
+    } catch (err) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  })();
+</script>
+
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -50,6 +67,7 @@
           <div id="layoutGroup" class="timeframe-group">
             <!-- render bằng ui.js: nút số ô, tự đổi theo hướng màn hình -->
           </div>
+          <!-- nút "☀️/🌙 đổi theme" được theme.js tự chèn vào đây -->
           <!-- nút "Trạng thái thị trường" được marketstatus.js tự chèn vào đây -->
           <!-- nút "🔔 Cảnh báo" được alerts.js tự chèn vào đây -->
         </div>
@@ -64,14 +82,6 @@
       </div>
 
       <!-- Vùng chart: LUÔN có 4 pane cố định -->
-      <!-- CẬP NHẬT (đợt fix này): bỏ hẳn hàng <header class="pane-header"> riêng
-           phía trên mỗi ô (chiếm mất chiều cao chart). Symbol/giá/%/đếm ngược giờ
-           được đưa vào 1 lớp phủ (.pane-overlay-top) đè TRỰC TIẾP lên góc trên-trái
-           của chart, xếp chồng ngay trên khối chỉ báo (EMA/RSI/BUY-SELL) đã có sẵn -
-           giống cách TradingView làm. Nhờ vậy pane-chart-container là phần tử DUY
-           NHẤT còn nằm trong luồng flex của .chart-pane -> tự động chiếm toàn bộ
-           chiều cao còn lại, nến hiển thị cao/rộng hơn hẳn. -->
-
       <div id="chartArea">
 
         <section id="pane-1" class="chart-pane">
@@ -148,6 +158,10 @@
   <script src="js/push-sync.js"></script>
   <script src="js/breakout.js"></script>
   <script src="js/drawing.js"></script>
+  <!-- theme.js PHẢI nằm TRƯỚC chart.js: chart.js đọc ThemeModule.getTheme()
+       ngay lúc khởi tạo mỗi pane (initChart) để tô màu chart lần đầu đúng
+       theme, không phải chờ tới lần đổi theme kế tiếp. -->
+  <script src="js/theme.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/layout.js"></script>
   <script src="js/ui.js"></script>

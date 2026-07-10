@@ -19,6 +19,11 @@
  * data-theme lên <html> NGAY LẬP TỨC (trước khi trang vẽ ra) để tránh bị
  * "nháy" nền tối mặc định rồi mới đổi sang sáng - module này chỉ cần đọc lại
  * đúng giá trị đó để đồng bộ trạng thái nút bấm.
+ *
+ * CẬP NHẬT (đợt fix này): nút bấm giờ dùng chung class .topbar-btn (định
+ * nghĩa trong style.css) để đồng bộ hình dáng với nút "Cảnh báo"/"Trạng thái
+ * thị trường" - trước đây tự vẽ style riêng bằng #themeToggleBtn, không
+ * khớp hoàn toàn với 2 nút kia.
  */
 
 const ThemeModule = (function () {
@@ -74,6 +79,7 @@ const ThemeModule = (function () {
   function buildButton() {
     const btn = document.createElement('button');
     btn.id = 'themeToggleBtn';
+    btn.className = 'topbar-btn';
     btn.type = 'button';
     btn.addEventListener('click', toggle);
     btnRef = btn;

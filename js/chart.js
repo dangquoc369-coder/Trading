@@ -1,49 +1,3 @@
-/**
- * chart.js
- * Khởi tạo và điều khiển biểu đồ Lightweight Charts v5.x.
- *
- * (Đợt fix trước - Phần 1: tự động tải thêm lịch sử khi kéo sang trái, xem
- * isLoadingOlder/setLoadingOlder/isNoMoreOlder/setNoMoreOlder/prependCandles.)
- *
- * (Phần 2, CẢNH BÁO):
- *   1) Truyền `onAlertRequested` vào DrawingModule.create() - khi người dùng
- *      chọn tool 🔔 và click lên chart, callback này gọi
- *      AlertsModule.addPriceAlert(symbol, price) để tạo cảnh báo mới.
- *   2) renderAlertLines()/clearAlertLines(): vẽ/xoá các đường ngang màu vàng
- *      cho MỌI cảnh báo giá CHƯA CHẠM của đúng symbol đang hiển thị ở pane
- *      này (dùng candleSeries.createPriceLine(), không phải canvas overlay -
- *      khác với hline do người dùng tự vẽ). Tự vẽ lại mỗi khi:
- *        - loadInitialData() được gọi (mới load nến / đổi symbol xong)
- *        - có sự kiện 'alerts:changed' (thêm/xoá/kích hoạt cảnh báo bất kỳ ở
- *          đâu trong app - lọc lại theo đúng symbol của pane này)
- *   3) Kết nối breakout.setOnNewSignal() -> phát ra sự kiện 'pane:newSignal'
- *      qua EventBus để app.js lắng nghe và gửi thông báo hệ thống (nếu pane
- *      đó đã bật signalAlertEnabled).
- *
- * ĐỢT FIX NÀY (MƯỢT HƠN - GỘP TÍNH LẠI CHỈ BÁO/BREAKOUT THEO KHUNG HÌNH):
- *   - Trước đây, MỖI khi có 1 tick giá mới từ BẤT KỲ socket nào trong 3
- *     socket của 1 pane (kline khung entry, khung trend, khung SL - cả 3
- *     đều gửi tick liên tục kể cả khi nến chưa đóng), app tính lại NGAY LẬP
- *     TỨC và ĐỒNG BỘ toàn bộ EMA/RSI/WMA + toàn bộ vòng lặp breakout. Với
- *     4 pane chạy song song (luôn real-time dù đang ẩn), việc này có thể
- *     dồn lại và gây giật, nhất là trên thiết bị yếu.
- *   - scheduleRecompute(needIndicators): gộp mọi yêu cầu tính lại trong
- *     cùng 1 khung hình (dùng requestAnimationFrame) thành ĐÚNG 1 lần tính
- *     lại mỗi frame, thay vì tính lại mỗi tick. Không đổi độ chính xác hay
- *     độ trễ cảm nhận được (chậm nhất ~1 frame ~16ms).
- *   - handleKlineUpdate (tick khung ENTRY) cần renderIndicators + runBreakout
- *     -> scheduleRecompute(true).
- *   - upsertHigherTFCandle/upsertSLCandle (tick khung TREND/SL) chỉ ảnh
- *     hưởng breakout, không ảnh hưởng chỉ báo trên khung entry -> chỉ cần
- *     runBreakout -> scheduleRecompute(false).
- *   - Các đường gọi runBreakout()/renderIndicators() còn lại (loadInitialData,
- *     prependCandles, setHigherTFCandles, setSLCandles, configureBreakout)
- *     là do HÀNH ĐỘNG rõ ràng của người dùng hoặc lúc tải dữ liệu ban đầu -
- *     tần suất thấp, giữ nguyên gọi NGAY LẬP TỨC để phản hồi tức thì.
- *   - destroy(): huỷ rAF đang chờ (nếu có) để tránh lỗi tham chiếu tới
- *     chart/candleSeries sau khi đã bị huỷ.
- */
-
 const ChartModule = (function () {
   const ENTRY_TO_HIGHER_TF = {
     '2h': '3d',
@@ -56,6 +10,25 @@ const ChartModule = (function () {
   function getHigherTimeframeFor(entryTimeframe) {
     return ENTRY_TO_HIGHER_TF[entryTimeframe] || null;
   }
+
+  // ===== Bảng màu chart theo theme (đợt fix này) =====
+  // Lightweight Charts vẽ bằng canvas nên không đọc được biến CSS - màu ở
+  // đây phải khớp thủ công với :root / :root[data-theme="light"] trong
+  // css/style.css (--bg-main, --text-primary, grid, border...).
+  const CHART_THEME = {
+    dark: {
+      background: '#131722',
+      text: '#d1d4dc',
+      grid: '#1e222d',
+      border: '#2a2e39',
+    },
+    light: {
+      background: '#ffffff',
+      text: '#131722',
+      grid: '#eef1f8',
+      border: '#e2e5ed',
+    },
+  };
 
   function create(paneId) {
     let chart = null;
@@ -73,17 +46,14 @@ const ChartModule = (function () {
 
     let currentCandles = [];
 
-    // ===== Trạng thái tải thêm lịch sử (kéo sang trái) - Phần 1 =====
     let loadingOlder = false;
     let noMoreOlder = false;
 
     let higherTFCandles = [];
     let slCandles = null;
 
-    // ===== Đường cảnh báo giá đang vẽ trên chart (Phần 2) =====
     let alertPriceLines = [];
 
-    // ===== Gộp tính lại theo khung hình (đợt fix này) =====
     let recomputeRafId = null;
     let needIndicatorRecompute = false;
 
@@ -97,9 +67,6 @@ const ChartModule = (function () {
 
     const breakout = BreakoutModule.create(paneId);
 
-    // Mỗi khi breakout.js phát hiện 1 tín hiệu BUY/SELL MỚI (không phải tín
-    // hiệu cũ trong lịch sử), phát sự kiện ra ngoài để app.js xử lý gửi
-    // thông báo hệ thống (tuỳ theo pane.signalAlertEnabled).
     breakout.setOnNewSignal((direction, time) => {
       EventBus.emit('pane:newSignal', { paneId, direction, time });
     });
@@ -114,13 +81,6 @@ const ChartModule = (function () {
       });
     }
 
-    /**
-     * Gộp mọi yêu cầu tính lại chỉ báo/breakout phát sinh trong CÙNG 1 khung
-     * hình thành đúng 1 lần chạy, thay vì chạy đồng bộ ngay mỗi lần được gọi.
-     * needIndicators=true nếu lần gọi này cần tính lại cả EMA/RSI/WMA (chỉ
-     * cần thiết khi có tick mới ở khung ENTRY); false nếu chỉ cần chạy lại
-     * breakout (tick ở khung TREND/SL không ảnh hưởng chỉ báo khung entry).
-     */
     function scheduleRecompute(needIndicators) {
       if (needIndicators) needIndicatorRecompute = true;
       if (recomputeRafId !== null) return;
@@ -158,9 +118,33 @@ const ChartModule = (function () {
       } else {
         currentCandles.push(candle);
       }
-      // Trước đây gọi renderIndicators()+runBreakout() đồng bộ NGAY mỗi tick.
-      // Giờ gộp lại theo khung hình để đỡ tính toán thừa khi tick dồn dập.
       scheduleRecompute(true);
+    }
+
+    /**
+     * Áp màu chart (nền/lưới/chữ/viền trục) theo theme hiện tại - gọi lúc
+     * khởi tạo VÀ mỗi khi ThemeModule phát ra 'theme:changed'.
+     */
+    function applyChartTheme(theme) {
+      if (!chart) return;
+      const c = CHART_THEME[theme] || CHART_THEME.dark;
+      chart.applyOptions({
+        layout: {
+          background: { type: 'solid', color: c.background },
+          textColor: c.text,
+          panes: { separatorColor: c.border },
+        },
+        grid: {
+          vertLines: { color: c.grid },
+          horzLines: { color: c.grid },
+        },
+        rightPriceScale: { borderColor: c.border },
+        timeScale: { borderColor: c.border },
+      });
+    }
+
+    function handleThemeChanged({ theme }) {
+      applyChartTheme(theme);
     }
 
     function initChart(container) {
@@ -170,22 +154,25 @@ const ChartModule = (function () {
       const initialWidth = container.clientWidth || rect.width || 400;
       const initialHeight = container.clientHeight || rect.height || 300;
 
+      const initialTheme = (typeof ThemeModule !== 'undefined' && ThemeModule.getTheme()) || 'dark';
+      const initialColors = CHART_THEME[initialTheme] || CHART_THEME.dark;
+
       chart = LightweightCharts.createChart(container, {
         autoSize: false,
         width: initialWidth,
         height: initialHeight,
         layout: {
-          background: { type: 'solid', color: '#131722' },
-          textColor: '#d1d4dc',
-          panes: { separatorColor: '#2a2e39' },
+          background: { type: 'solid', color: initialColors.background },
+          textColor: initialColors.text,
+          panes: { separatorColor: initialColors.border },
         },
         grid: {
-          vertLines: { color: '#1e222d' },
-          horzLines: { color: '#1e222d' },
+          vertLines: { color: initialColors.grid },
+          horzLines: { color: initialColors.grid },
         },
         crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        rightPriceScale: { borderColor: '#2a2e39' },
-        timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false },
+        rightPriceScale: { borderColor: initialColors.border },
+        timeScale: { borderColor: initialColors.border, timeVisible: true, secondsVisible: false },
       });
 
       candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
@@ -296,11 +283,8 @@ const ChartModule = (function () {
       });
 
       EventBus.on('kline:update', handleKlineUpdate);
-
-      // Vẽ lại đường cảnh báo giá của pane này mỗi khi có thay đổi cảnh báo
-      // ở BẤT KỲ đâu trong app (thêm/xoá/kích hoạt) - tự lọc theo đúng symbol
-      // hiện tại của pane bên trong renderAlertLines().
       EventBus.on('alerts:changed', renderAlertLines);
+      EventBus.on('theme:changed', handleThemeChanged);
 
       drawing = DrawingModule.create(paneId, chart, candleSeries, container, {
         onAlertRequested: (price) => {
@@ -387,8 +371,6 @@ const ChartModule = (function () {
       const idx = higherTFCandles.findIndex((c) => c.time === candle.time);
       if (idx >= 0) higherTFCandles[idx] = candle;
       else higherTFCandles.push(candle);
-      // Tick khung TREND không ảnh hưởng chỉ báo khung entry - chỉ cần chạy
-      // lại breakout, và gộp theo khung hình như tick khung entry.
       scheduleRecompute(false);
     }
 
@@ -406,7 +388,6 @@ const ChartModule = (function () {
       const idx = slCandles.findIndex((c) => c.time === candle.time);
       if (idx >= 0) slCandles[idx] = candle;
       else slCandles.push(candle);
-      // Tick khung SL cũng chỉ ảnh hưởng breakout - gộp theo khung hình.
       scheduleRecompute(false);
     }
 
@@ -419,8 +400,6 @@ const ChartModule = (function () {
       return breakout.getConfig();
     }
 
-    // ===================== CẢNH BÁO GIÁ (đường ngang) =====================
-
     function clearAlertLines() {
       alertPriceLines.forEach((line) => {
         try {
@@ -432,7 +411,6 @@ const ChartModule = (function () {
       alertPriceLines = [];
     }
 
-    /** Vẽ lại toàn bộ đường cảnh báo giá CHƯA CHẠM của đúng symbol hiện tại của pane này. */
     function renderAlertLines() {
       clearAlertLines();
       const pane = Store.getPane(paneId);
@@ -483,11 +461,7 @@ const ChartModule = (function () {
       slCandles = null;
       resetHistoryFlags();
       runBreakout();
-      // Không clearAlertLines() ở đây - loadInitialData() của symbol MỚI sẽ tự
-      // gọi renderAlertLines() lại (lọc đúng theo symbol mới) ngay sau đó.
     }
-
-    // ===================== TẢI THÊM LỊCH SỬ (kéo sang trái) - Phần 1 =====================
 
     function isLoadingOlder() {
       return loadingOlder;
@@ -551,9 +525,8 @@ const ChartModule = (function () {
     function destroy() {
       EventBus.off('kline:update', handleKlineUpdate);
       EventBus.off('alerts:changed', renderAlertLines);
+      EventBus.off('theme:changed', handleThemeChanged);
       if (resizeObserver) resizeObserver.disconnect();
-      // Huỷ rAF gộp tính lại đang chờ (nếu có) - tránh chạy renderIndicators/
-      // runBreakout tham chiếu tới series/chart đã bị huỷ bên dưới.
       if (recomputeRafId !== null) {
         cancelAnimationFrame(recomputeRafId);
         recomputeRafId = null;

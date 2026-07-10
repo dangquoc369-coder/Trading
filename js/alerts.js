@@ -1,20 +1,3 @@
-/**
- * alerts.js
- * Quản lý CẢNH BÁO GIÁ (kiểu TradingView):
- *   - Người dùng chọn công cụ 🔔 trong thanh vẽ dùng chung, click lên chart
- *     đang focus -> tạo 1 cảnh báo tại mức giá đó (xem drawing.js/chart.js).
- *   - Cảnh báo được lưu theo SYMBOL (không theo pane cụ thể) và lưu vào
- *     localStorage để không mất khi tải lại trang - đồng thời tự vẽ đường
- *     ngang màu vàng trên MỌI pane đang hiển thị đúng symbol đó.
- *   - checkPrice(symbol, price) được app.js gọi mỗi khi có giá mới (từ
- *     ticker socket) để phát hiện lúc giá VỪA vượt qua mức cảnh báo (so giá
- *     trước và giá hiện tại), rồi bắn thông báo + đánh dấu "đã chạm".
- *
- * Module này KHÔNG đụng vào DOM chart trực tiếp (đó là việc của chart.js) -
- * chỉ quản lý dữ liệu + UI bảng danh sách cảnh báo riêng của nó, và bắn sự
- * kiện 'alerts:changed' để các nơi khác (chart.js) tự vẽ lại.
- */
-
 const AlertsModule = (function () {
   const STORAGE_KEY = 'dq_tracker_price_alerts_v1';
 
@@ -40,7 +23,6 @@ const AlertsModule = (function () {
     }
   }
 
-  /** Tạo 1 cảnh báo giá mới cho 1 symbol. */
   function addPriceAlert(symbol, price) {
     const alert = {
       id: uid('alert'),
@@ -63,7 +45,6 @@ const AlertsModule = (function () {
     renderPanel();
   }
 
-  /** Danh sách cảnh báo CHƯA chạm của 1 symbol - dùng để vẽ đường ngang trên chart. */
   function getAlertsForSymbol(symbol) {
     return alerts.filter((a) => a.symbol === symbol && !a.triggered);
   }
@@ -72,12 +53,6 @@ const AlertsModule = (function () {
     return alerts.slice();
   }
 
-  /**
-   * Kiểm tra giá mới nhất của 1 symbol so với các cảnh báo đang chờ.
-   * Dùng cách so giá TRƯỚC và giá HIỆN TẠI để phát hiện đúng lúc giá "vượt
-   * qua" mức cảnh báo (thay vì chỉ so giá hiện tại >= hoặc <= mức, vì cách
-   * đó sẽ báo liên tục mỗi tick sau khi đã qua mức).
-   */
   function checkPrice(symbol, price) {
     const prev = lastPriceForSymbol[symbol];
     lastPriceForSymbol[symbol] = price;
@@ -102,11 +77,10 @@ const AlertsModule = (function () {
     }
   }
 
-  /* ===================== UI: NÚT + BẢNG DANH SÁCH ===================== */
-
   function buildButton() {
     const btn = document.createElement('button');
     btn.id = 'alertsListBtn';
+    btn.className = 'topbar-btn';
     btn.type = 'button';
     btn.textContent = '🔔 Cảnh báo';
     btn.addEventListener('click', () => {
@@ -123,6 +97,7 @@ const AlertsModule = (function () {
   function buildPanel() {
     const panel = document.createElement('div');
     panel.id = 'alertsListPanel';
+    panel.className = 'ms-panel';
     panel.innerHTML = `
       <div class="ms-header">
         <span>🔔 Danh sách cảnh báo giá</span>

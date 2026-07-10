@@ -1,15 +1,63 @@
+/*
+ * ===================== BẢNG MÀU (THEME TOKENS) =====================
+ * Toàn bộ màu sắc của app đi qua các biến CSS này - KHÔNG hardcode màu
+ * trực tiếp trong rule khác (trừ vài chỗ đặc thù đã ghi chú riêng).
+ * theme.js chỉ cần đổi attribute data-theme trên <html> là toàn bộ giao
+ * diện tự cập nhật, không cần sửa gì thêm ở đây.
+ *
+ * LƯU Ý: chart Lightweight Charts vẽ bằng canvas nên KHÔNG đọc được biến
+ * CSS - màu nền/lưới/chữ của chart được set trực tiếp bằng JS trong
+ * chart.js (xem CHART_THEME_COLORS), phải đổi song song với bảng màu ở
+ * đây nếu muốn tinh chỉnh thêm.
+ */
 :root {
   --bg-main: #131722;
   --bg-panel: #1a1e2a;
   --bg-hover: #232838;
+  --bg-elevated: #1e222d;
   --border-color: #2a2e39;
   --text-primary: #d1d4dc;
   --text-secondary: #787b86;
   --accent-blue: #2962ff;
+  --accent-blue-soft: rgba(41, 98, 255, 0.14);
   --green: #26a69a;
   --red: #ef5350;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --yellow: #f5c518;
+  --green-soft: rgba(38, 166, 154, 0.12);
+  --red-soft: rgba(239, 83, 80, 0.12);
+  --overlay-bg: rgba(26, 30, 42, 0.85);
+  --overlay-bg-strong: rgba(26, 30, 42, 0.94);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.28);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.38);
+  --scrollbar-thumb: #363c4a;
+  --on-accent: #ffffff;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --sidebar-width: 260px; /* đổi runtime bởi sidebar-resize.js khi kéo/thu gọn */
+  color-scheme: dark;
+}
+
+/* ===== NỀN SÁNG (light theme) - xem theme.js ===== */
+:root[data-theme="light"] {
+  --bg-main: #ffffff;
+  --bg-panel: #f7f8fb;
+  --bg-hover: #eef1f8;
+  --bg-elevated: #ffffff;
+  --border-color: #e2e5ed;
+  --text-primary: #131722;
+  --text-secondary: #6b6f7b;
+  --accent-blue: #2962ff;
+  --accent-blue-soft: rgba(41, 98, 255, 0.1);
+  --green: #089981;
+  --red: #f23645;
+  --yellow: #b8860b;
+  --green-soft: rgba(8, 153, 129, 0.1);
+  --red-soft: rgba(242, 54, 69, 0.1);
+  --overlay-bg: rgba(255, 255, 255, 0.88);
+  --overlay-bg-strong: rgba(255, 255, 255, 0.96);
+  --shadow-sm: 0 2px 6px rgba(20, 24, 40, 0.08);
+  --shadow-md: 0 10px 28px rgba(20, 24, 40, 0.14);
+  --scrollbar-thumb: #d7dbe6;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -21,6 +69,16 @@ html, body {
   font-family: var(--font);
   font-size: 13px;
   overflow: hidden;
+}
+
+/* Đổi theme mượt thay vì "giật" đổi màu tức thì - áp dụng cho các mảng nền/
+   viền/chữ chính, không áp cho canvas chart (đã xử lý riêng ở chart.js). */
+body,
+#sidebar, #main, #topbar, #controlBar, .chart-pane, .symbol-list li,
+.timeframe-btn, .draw-tool-btn, .indicator-chip, .legend-toggle-btn,
+.indicator-popover, #alertsListPanel, #marketStatusPanel, .topbar-btn,
+.symbol-search input, .symbol-search-results, .chart-pane .connection-status {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 #app {
@@ -220,8 +278,8 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-.change.up { color: var(--green); background: rgba(38,166,154,0.12); }
-.change.down { color: var(--red); background: rgba(239,83,80,0.12); }
+.change.up { color: var(--green); background: var(--green-soft); }
+.change.down { color: var(--red); background: var(--red-soft); }
 
 /* Đếm ngược đóng nến - nhỏ, ngay cạnh giá/% thay đổi của mỗi ô */
 .candle-countdown {
@@ -347,13 +405,6 @@ html, body {
   border-color: var(--accent-blue);
 }
 
-/* ĐỢT FIX NÀY: bỏ hẳn .pane-header/.pane-header-left làm hàng riêng chiếm
-   chiều cao ở trên chart. Symbol/giá/%/đếm ngược giờ nằm trong
-   .pane-overlay-top/.pane-symbol-row (xem phần "OVERLAY TRÊN CHART" bên
-   dưới, gần .pane-indicators) - đè trực tiếp lên góc trên-trái của chart,
-   giống TradingView. Nhờ vậy .pane-chart-container là phần tử DUY NHẤT còn
-   nằm trong luồng flex của .chart-pane -> tự chiếm toàn bộ chiều cao. */
-
 .pane-symbol {
   font-size: 13px;
   font-weight: 700;
@@ -398,12 +449,6 @@ html, body {
 .chart-pane .connection-status.connected::before { background: var(--green); }
 .chart-pane .connection-status.disconnected::before { background: var(--red); }
 
-/* ===================== OVERLAY TRÊN CHART: SYMBOL/GIÁ + INDICATOR LEGEND =====================
-   ĐỢT FIX NÀY: gộp hàng symbol/giá/%/đếm ngược (trước đây là .pane-header
-   riêng) VÀ khối chỉ báo (EMA/RSI/BUY-SELL) vào chung 1 lớp phủ tuyệt đối ở
-   góc trên-trái chart, xếp theo cột (symbol row trước, chỉ báo bên dưới) -
-   không còn chiếm hàng riêng phía trên chart nữa, chart có tối đa chiều cao. */
-
 .pane-overlay-top {
   position: absolute;
   top: 8px;
@@ -413,7 +458,7 @@ html, body {
   flex-direction: column;
   gap: 6px;
   max-width: calc(100% - 16px);
-  pointer-events: none; /* để click/kéo xuyên qua xuống chart bên dưới bình thường */
+  pointer-events: none;
 }
 
 .pane-symbol-row {
@@ -422,13 +467,11 @@ html, body {
   gap: 8px;
   flex-wrap: wrap;
   width: fit-content;
-  background: rgba(26, 30, 42, 0.85);
+  background: var(--overlay-bg);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 4px 8px;
 }
-
-/* ===================== INDICATOR LEGEND (mỗi pane) ===================== */
 
 .pane-indicators {
   display: flex;
@@ -437,20 +480,14 @@ html, body {
   pointer-events: none;
 }
 
-/* CẬP NHẬT (đợt fix này): khi thu gọn, container chỉ còn đúng nút toggle -
-   không cần layout đặc biệt gì thêm vì các chip con đơn giản không được vẽ
-   ra (xem indicator-legend.js render()), nhưng vẫn khai báo class này để dễ
-   mở rộng CSS riêng cho trạng thái thu gọn nếu cần sau này. */
 .pane-indicators.legend-collapsed {
   gap: 0;
 }
 
-/* Nút thu gọn/mở rộng toàn bộ bảng chỉ báo - luôn hiển thị, kể cả khi đang
-   thu gọn, để người dùng luôn mở lại được. */
 .legend-toggle-btn {
   display: flex;
   align-items: center;
-  background: rgba(26, 30, 42, 0.9);
+  background: var(--overlay-bg-strong);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 3px 7px;
@@ -469,7 +506,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 5px;
-  background: rgba(26, 30, 42, 0.85);
+  background: var(--overlay-bg);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 2px 6px;
@@ -518,15 +555,13 @@ html, body {
   border-radius: 6px;
   padding: 8px;
   width: 150px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  box-shadow: var(--shadow-md);
   z-index: 50;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-/* Popover rộng hơn - dùng cho cài đặt breakout (nhiều field hơn: số nến,
-   nguồn SL, khung SL tuỳ chọn...) */
 .indicator-popover.wide {
   width: 210px;
 }
@@ -560,8 +595,6 @@ html, body {
 }
 .indicator-popover select:focus { border-color: var(--accent-blue); }
 
-/* Hàng điều kiện (vd chọn khung SL tuỳ chọn) - chỉ hiện khi cần, xem
-   indicator-legend.js updateConditionalVisibility() */
 .bo-conditional-row {
   display: flex;
   flex-direction: column;
@@ -597,18 +630,16 @@ html, body {
 
 .indicator-popover-actions .ip-apply {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent);
 }
 .indicator-popover-actions .ip-apply:hover { opacity: 0.9; }
-
-/* ===================== CÔNG CỤ VẼ (dùng chung, xem #sharedDrawGroup) ===== */
 
 .draw-canvas {
   position: absolute;
   top: 0;
   left: 0;
   z-index: 4;
-  pointer-events: none; /* chỉ bật khi 1 tool khác 'cursor' đang được chọn */
+  pointer-events: none;
 }
 
 .draw-tool-btn {
@@ -626,14 +657,48 @@ html, body {
   line-height: 1;
 }
 .draw-tool-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-.draw-tool-btn.active { background: var(--accent-blue); color: #fff; }
+.draw-tool-btn.active { background: var(--accent-blue); color: var(--on-accent); }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
-/* ===================== HAMBURGER MENU (mobile) ===================== */
+/* ===================== NÚT TOPBAR DÙNG CHUNG =====================
+   marketstatus.js / alerts.js / theme.js đều gắn class này lên nút của
+   mình để có 1 kiểu nút thống nhất, tự đổi theo theme (xem theme.js). */
+.topbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: var(--font);
+  cursor: pointer;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.topbar-btn:hover { background: var(--bg-hover); border-color: var(--accent-blue); }
+.topbar-btn:active { transform: translateY(1px); }
+
+/* Chấm "đang chạy real-time" nhấp nháy nhẹ - dùng cho trạng thái kết nối */
+@keyframes dq-live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(38, 166, 154, 0.35); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(38, 166, 154, 0); }
+}
+.chart-pane .connection-status.connected::before {
+  animation: dq-live-pulse 2s ease-in-out infinite;
+}
+
+/* Viền + bóng đổ tinh tế hơn cho ô đang focus - rõ ràng nhưng không chói */
+.chart-pane.pane-focused {
+  box-shadow: inset 0 0 0 1px var(--accent-blue);
+}
 
 #mobileSidebarToggle {
   position: fixed;
@@ -653,13 +718,11 @@ html, body {
   cursor: pointer;
 }
 
-/* ===================== RESPONSIVE / MOBILE ===================== */
-
 @media (max-width: 900px) {
   html, body { font-size: 12px; }
 
   #app {
-    grid-template-columns: 1fr; /* sidebar không còn chiếm cột cố định */
+    grid-template-columns: 1fr;
   }
 
   #mobileSidebarToggle { display: flex; }
@@ -672,7 +735,7 @@ html, body {
     width: min(80vw, 300px) !important;
     max-width: 300px;
     z-index: 150;
-    box-shadow: 4px 0 16px rgba(0,0,0,0.4);
+    box-shadow: var(--shadow-md);
     transform: translateX(-100%);
     transition: transform 0.22s ease;
   }
@@ -695,7 +758,7 @@ html, body {
   #topbar {
     height: auto;
     min-height: 52px;
-    padding: 8px 10px 8px 54px; /* chừa chỗ cho nút hamburger bên trái */
+    padding: 8px 10px 8px 54px;
     flex-wrap: wrap;
     gap: 6px;
   }
@@ -713,7 +776,7 @@ html, body {
 
   .indicator-chip { font-size: 10px; padding: 3px 6px; }
   .legend-toggle-btn { font-size: 10px; padding: 3px 6px; }
-  .draw-tool-btn { width: 30px; height: 30px; font-size: 14px; } /* to hơn cho ngón tay bấm dễ */
+  .draw-tool-btn { width: 30px; height: 30px; font-size: 14px; }
 
   #marketStatusBtn { font-size: 12px; padding: 6px 10px; margin-left: 0; }
 }
@@ -725,8 +788,6 @@ html, body {
 @media (max-width: 480px) {
   .change { font-size: 10.5px; padding: 1px 5px; }
 }
-/* ===================== BANNER XIN QUYỀN THÔNG BÁO ===================== */
-
 #notifPermissionBanner {
   position: fixed;
   left: 12px;
@@ -742,7 +803,7 @@ html, body {
   gap: 10px;
   font-size: 12.5px;
   color: var(--text-primary);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   max-width: 420px;
   margin: 0 auto;
 }
@@ -763,7 +824,7 @@ html, body {
 
 #notifAllowBtn {
   background: var(--accent-blue);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 #notifDismissBtn {
@@ -771,24 +832,13 @@ html, body {
   color: var(--text-secondary);
 }
 
-/* ===================== NÚT + PANEL DANH SÁCH CẢNH BÁO GIÁ ===================== */
-
-#alertsListBtn {
-  background: #1e222d;
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  margin-left: 8px;
-}
-
-#alertsListBtn:hover {
-  background: var(--bg-hover);
-}
-
-#alertsListPanel {
+/* ===================== PANEL NỔI DÙNG CHUNG (cảnh báo / trạng thái thị trường) =====================
+   Cả #alertsListPanel (alerts.js) và #marketStatusPanel (marketstatus.js)
+   đều mang class .ms-panel để dùng chung 1 style - tự đổi theo theme vì chỉ
+   dùng biến CSS, không còn hardcode hex riêng như trước (marketstatus.js đã
+   bỏ hàm injectStyles() cũ, vốn là lý do panel đó "kẹt" ở giao diện tối kể
+   cả khi bật nền sáng). */
+.ms-panel {
   position: fixed;
   top: 60px;
   right: 20px;
@@ -797,7 +847,7 @@ html, body {
   background: var(--bg-main);
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
   color: var(--text-primary);
   font-size: 13px;
   z-index: 9999;
@@ -807,29 +857,33 @@ html, body {
   overflow-y: auto;
 }
 
-#alertsListPanel.open {
+.ms-panel.open {
   display: block;
 }
 
-#alertsListPanel .ms-header {
+.ms-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-primary);
 }
 
-#alertsListPanel .ms-close {
+.ms-close {
   cursor: pointer;
   color: var(--text-secondary);
   font-size: 16px;
   line-height: 1;
 }
 
-#alertsListPanel .ms-row { margin-bottom: 6px; line-height: 1.4; }
-#alertsListPanel .ms-muted { color: var(--text-secondary); font-size: 12px; }
-#alertsListPanel .ms-bold { font-weight: 600; color: #fff; }
+.ms-row { margin-bottom: 6px; line-height: 1.4; }
+.ms-muted { color: var(--text-secondary); font-size: 12px; }
+.ms-bold { font-weight: 600; color: var(--text-primary); }
+.ms-divider { border-top: 1px solid var(--border-color); margin: 10px 0; }
+.ms-trend-up { color: var(--green); font-weight: 600; }
+.ms-trend-down { color: var(--red); font-weight: 600; }
+.ms-trend-side { color: var(--yellow); font-weight: 600; }
 
 .alert-item {
   display: flex;
@@ -861,8 +915,6 @@ html, body {
   border-color: var(--red);
 }
 
-/* ===================== CHECKBOX THÔNG BÁO TÍN HIỆU (popover breakout) ===================== */
-
 .bo-notify-row {
   display: flex;
   align-items: center;
@@ -880,8 +932,6 @@ html, body {
   font-size: 11px;
   color: var(--text-secondary);
 }
-
-/* ===================== RESPONSIVE bổ sung cho cảnh báo (mobile) ===================== */
 
 @media (max-width: 900px) {
   #alertsListBtn { font-size: 12px; padding: 6px 10px; margin-left: 6px; }
