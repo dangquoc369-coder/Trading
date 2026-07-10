@@ -43,6 +43,7 @@ const DrawingModule = (function () {
     let drawings = [];
     let dragStart = null;
     let previewDrawing = null;
+    let hoverPoint = null; // { x, y, price } - vị trí con trỏ hiện tại, dùng để vẽ crosshair tự chế
 
     // Đảm bảo container có position để canvas overlay tuyệt đối bám đúng vị trí
     const computed = window.getComputedStyle(container);
@@ -100,6 +101,7 @@ const DrawingModule = (function () {
       ctx.clearRect(0, 0, width, height);
       drawings.forEach((d) => drawShape(d, false));
       if (previewDrawing) drawShape(previewDrawing, true);
+      drawCrosshair();
     }
 
     function drawShape(d, isPreview) {
@@ -139,6 +141,51 @@ const DrawingModule = (function () {
       }
       ctx.restore();
     }
+    
+    /**
+     * Crosshair tự vẽ (đợt fix này): khi 1 tool vẽ/cảnh báo đang bật, canvas
+     * overlay chiếm hết pointer-events nên crosshair GỐC của lightweight-charts
+     * không hiện được nữa (event không lọt xuống chart). Vẽ lại crosshair thủ
+     * công ngay trên overlay này để người dùng vẫn canh giá/thời gian chính
+     * xác khi vẽ hoặc đặt cảnh báo.
+     */
+    function drawCrosshair() {
+      if (!hoverPoint || currentTool === 'cursor') return;
+      const { width, height } = getRect();
+      const { x, y, price } = hoverPoint;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120, 123, 134, 0.65)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      if (price !== null && price !== undefined && !Number.isNaN(price)) {
+        const label = formatPrice(price);
+        ctx.font = '10px sans-serif';
+        const textWidth = ctx.measureText(label).width;
+        const boxW = textWidth + 8;
+        const boxH = 16;
+        const boxY = Math.min(Math.max(y - boxH / 2, 0), height - boxH);
+
+        ctx.fillStyle = '#2962ff';
+        ctx.fillRect(width - boxW, boxY, boxW, boxH);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(label, width - boxW + 4, boxY + 11);
+      }
+
+      ctx.restore();
+    }
 
     function pointFromEvent(e) {
       const rect = canvas.getBoundingClientRect();
@@ -173,10 +220,21 @@ const DrawingModule = (function () {
     }
 
     function onPointerMove(e) {
-      if (currentTool === 'cursor' || currentTool === 'alert' || !dragStart) return;
+      if (currentTool === 'cursor') return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
       const pt = pointFromEvent(e);
-      if (pt.time === null || pt.time === undefined || pt.price === null || pt.price === undefined) return;
-      previewDrawing = { type: currentTool, p1: dragStart, p2: pt };
+      hoverPoint = { x, y, price: pt.price };
+
+      if (dragStart && currentTool !== 'alert') {
+        if (pt.time === null || pt.time === undefined || pt.price === null || pt.price === undefined) {
+          redraw();
+          return;
+        }
+        previewDrawing = { type: currentTool, p1: dragStart, p2: pt };
+      }
       redraw();
     }
 
@@ -198,7 +256,8 @@ const DrawingModule = (function () {
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', () => { dragStart = null; previewDrawing = null; redraw(); });
+    canvas.addEventListener('pointercancel', () => { dragStart = null; previewDrawing = null; hoverPoint = null; redraw(); });
+    canvas.addEventListener('pointerleave', () => { hoverPoint = null; redraw(); });
 
     chart.timeScale().subscribeVisibleLogicalRangeChange(() => redraw());
 

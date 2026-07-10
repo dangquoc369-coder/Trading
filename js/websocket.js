@@ -27,6 +27,8 @@ function getOrCreateEntry(paneId) {
       tickerSocket: null,
       htfKlineSocket: null,
       slKlineSocket: null,
+      trendRefSockets: {},          // role -> WebSocket
+      trendRefReconnectTimers: {},  // role -> timer
       intentionalClose: false,
       klineReconnectTimer: null,
       tickerReconnectTimer: null,
@@ -155,6 +157,64 @@ function connectSLKlineStream(paneId, symbol, interval) {
     }
   };
 }
+/**
+ * Socket kline RIÊNG cho từng "khung tham khảo" của trend-reference.js
+ * (m5, m15, h1, h2, h4, d1, d3). Độc lập hoàn toàn với socket khung entry/
+ * trend/SL ở trên. Phát event 'kline:update:trendref' kèm theo `role` để
+ * app.js biết đẩy vào đúng khung nào trong TrendReferenceModule.
+ */
+function connectTrendRefKlineStream(paneId, role, symbol, interval) {
+  const entry = getOrCreateEntry(paneId);
+  closeTrendRefKlineSocket(paneId, role);
+
+  const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
+  const socket = new WebSocket(`${WS_BASE}/${streamName}`);
+  entry.trendRefSockets[role] = socket;
+
+  socket.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    const k = msg.k;
+    const candle = {
+      time: Math.floor(k.t / 1000),
+      open: parseFloat(k.o),
+      high: parseFloat(k.h),
+      low: parseFloat(k.l),
+      close: parseFloat(k.c),
+      volume: parseFloat(k.v),
+      closed: k.x,
+    };
+    EventBus.emit('kline:update:trendref', { paneId, role, candle });
+  };
+
+  socket.onclose = () => {
+    if (entry.trendRefSockets[role] !== socket) return;
+    if (!entry.intentionalClose) {
+      entry.trendRefReconnectTimers[role] = setTimeout(() => {
+        connectTrendRefKlineStream(paneId, role, symbol, interval);
+      }, 2000);
+    }
+  };
+}
+
+function closeTrendRefKlineSocket(paneId, role) {
+  const entry = connections.get(paneId);
+  if (!entry) return;
+  clearTimeout(entry.trendRefReconnectTimers[role]);
+  const sock = entry.trendRefSockets[role];
+  if (sock) {
+    entry.intentionalClose = true;
+    sock.onclose = null;
+    sock.close();
+    entry.trendRefSockets[role] = null;
+    entry.intentionalClose = false;
+  }
+}
+
+function closeAllTrendRefKlineSockets(paneId) {
+  const entry = connections.get(paneId);
+  if (!entry) return;
+  Object.keys(entry.trendRefSockets).forEach((role) => closeTrendRefKlineSocket(paneId, role));
+}
 
 function connectTickerStream(paneId, symbol) {
   const entry = getOrCreateEntry(paneId);
@@ -238,6 +298,7 @@ function closePaneSockets(paneId) {
   closeHigherTFKlineSocket(paneId);
   closeSLKlineSocket(paneId);
   closeTickerSocket(paneId);
+  closeAllTrendRefKlineSockets(paneId); // thêm dòng này
   connections.delete(paneId);
 }
 

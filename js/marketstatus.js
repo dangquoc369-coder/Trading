@@ -28,42 +28,50 @@
     return d.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
   }
 
-  function buildStatusHTML(status, paneLabel) {
+  function labelForSwing(v) {
+    if (v === 'up') return { text: '📈 Tăng', cls: 'ms-trend-up' };
+    if (v === 'down') return { text: '📉 Giảm', cls: 'ms-trend-down' };
+    if (v === 'sideway') return { text: '⏸️ Sideway', cls: 'ms-trend-side' };
+    return { text: '⏳ Đang xác định...', cls: 'ms-muted' };
+  }
+
+  function labelForScalp(v) {
+    if (v === 'up') return { text: '📈 Xu hướng tăng', cls: 'ms-trend-up' };
+    if (v === 'down') return { text: '📉 Xu hướng giảm', cls: 'ms-trend-down' };
+    return { text: '⏳ Đang xác định...', cls: 'ms-muted' };
+  }
+
+  /**
+   * Trend tham khảo MỚI (đợt fix này): luôn báo đủ Swing H1|H4|D1 + Scalp,
+   * KHÔNG phụ thuộc timeframe đang mở của pane - lấy từ TrendReferenceModule
+   * instance riêng của pane (xem TrendRefRegistry trong app.js).
+   */
+  function buildTrendReferenceHTML(trendRef) {
+    if (!trendRef) {
+      return `<div class="ms-row ms-muted">⚠️ Chưa có dữ liệu trend tham khảo.</div>`;
+    }
+    const h1 = labelForSwing(trendRef.swing.h1);
+    const h4 = labelForSwing(trendRef.swing.h4);
+    const d1 = labelForSwing(trendRef.swing.d1);
+    const scalp = labelForScalp(trendRef.scalp);
+
+    return `
+      <div class="ms-row ms-bold">🧭 TREND SWING (tham khảo)</div>
+      <div class="ms-row ${h1.cls}">H1: ${h1.text}</div>
+      <div class="ms-row ${h4.cls}">H4: ${h4.text}</div>
+      <div class="ms-row ${d1.cls}">D1: ${d1.text}</div>
+      <div class="ms-divider"></div>
+      <div class="ms-row ms-bold">⚡ TREND SCALP (tham khảo)</div>
+      <div class="ms-row ${scalp.cls}">${scalp.text}</div>
+    `;
+  }
+
+  function buildStatusHTML(status, paneLabel, trendRef) {
     if (!status.ok) {
       return `<div class="ms-row ms-muted">${status.reason}</div>`;
     }
 
-    let trendHTML = '';
-    if (status.trend === 'up') {
-      trendHTML = `
-        <div class="ms-row ms-trend-up">✅ NẾN GẦN NHẤT: XU HƯỚNG TĂNG (tham khảo)</div>
-        <div class="ms-row ms-muted">📏 Vượt vùng bán buôn: +${formatPriceLocalMS(status.breakDistance)}</div>`;
-    } else if (status.trend === 'down') {
-      trendHTML = `
-        <div class="ms-row ms-trend-down">✅ NẾN GẦN NHẤT: XU HƯỚNG GIẢM (tham khảo)</div>
-        <div class="ms-row ms-muted">📏 Vượt vùng bán buôn: -${formatPriceLocalMS(status.breakDistance)}</div>`;
-    } else {
-      trendHTML = `
-        <div class="ms-row ms-trend-side">⏸️ NẾN GẦN NHẤT: ĐANG SIDEWAY (tham khảo)</div>`;
-      if (status.maxHigh12 !== null && status.maxHigh12 !== undefined) {
-        trendHTML += `
-        <div class="ms-row ms-muted">📏 Tới vùng trên (tham khảo): +${formatPriceLocalMS(status.maxHigh12 - status.currentPrice)}</div>
-        <div class="ms-row ms-muted">📏 Tới vùng dưới (tham khảo): -${formatPriceLocalMS(status.currentPrice - status.minLow12)}</div>`;
-      }
-    }
-
-    let crossTFHTML = '';
-    if (status.crossTF) {
-      crossTFHTML = `
-        <div class="ms-divider"></div>
-        <div class="ms-row ms-bold">🎯 VÙNG BREAKOUT VÀO LỆNH (khung trend)</div>
-        <div class="ms-row ms-muted">📏 Tới vùng trên: +${formatPriceLocalMS(status.crossTF.distanceToHighZone)}</div>
-        <div class="ms-row ms-muted">📏 Tới vùng dưới: -${formatPriceLocalMS(status.crossTF.distanceToLowZone)}</div>`;
-    } else {
-      crossTFHTML = `
-        <div class="ms-divider"></div>
-        <div class="ms-row ms-muted">⚠️ Chưa có dữ liệu khung trend để xác định vùng breakout thật.</div>`;
-    }
+    const trendRefHTML = buildTrendReferenceHTML(trendRef);
 
     let tradeHTML = '';
     if (status.activeTradeOpen) {
@@ -86,8 +94,8 @@
     return `
       <div class="ms-row ms-bold">${paneLabel}</div>
       <div class="ms-row ms-muted">⏱️ Nến đóng gần nhất: ${formatTime(status.lastClosedCandleTime)}</div>
-      ${trendHTML}
-      ${crossTFHTML}
+      <div class="ms-divider"></div>
+      ${trendRefHTML}
       ${tradeHTML}
     `;
   }
@@ -116,8 +124,12 @@
       const entryCandles = instance.getCandles();
       const higherTFCandles = typeof instance.getHigherTFCandles === 'function' ? instance.getHigherTFCandles() : [];
       const status = instance.getBreakout().getMarketStatus({ entryCandles, higherTFCandles });
+
+      const trendRefInstance = window.TrendRefRegistry ? window.TrendRefRegistry.get(activePane.id) : null;
+      const trendRef = trendRefInstance ? trendRefInstance.compute() : null;
+
       const paneLabel = `Pane đang xem: ${activePane.symbol} (${activePane.timeframe})`;
-      body.innerHTML = buildStatusHTML(status, paneLabel);
+      body.innerHTML = buildStatusHTML(status, paneLabel, trendRef);
     } catch (err) {
       body.innerHTML = `<div class="ms-row ms-muted">Lỗi khi lấy trạng thái: ${err.message}</div>`;
       console.error('marketstatus.js error:', err);

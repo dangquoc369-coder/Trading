@@ -37,7 +37,20 @@
       return paneInstances[paneId];
     },
   };
+  const trendRefInstances = {}; // paneId -> TrendReferenceModule instance
 
+  window.PaneRegistry = {
+    get(paneId) {
+      return paneInstances[paneId];
+    },
+  };
+
+  // Registry riêng cho trend tham khảo, marketstatus.js đọc từ đây.
+  window.TrendRefRegistry = {
+    get(paneId) {
+      return trendRefInstances[paneId];
+    },
+  };
   try {
     await init();
   } catch (err) {
@@ -62,6 +75,10 @@
     EventBus.on('pane:breakoutConfigChanged', onBreakoutConfigChanged);
     EventBus.on('layout:changed', onLayoutChanged);
     EventBus.on('pane:needMoreHistory', onNeedMoreHistory);
+    EventBus.on('kline:update:trendref', onTrendRefKlineUpdate);
+    // Trend tham khảo chỉ phụ thuộc SYMBOL của pane, không phụ thuộc
+    // timeframe đang xem -> chỉ reload khi đổi symbol, không đổi timeframe.
+    EventBus.on('pane:symbolChanged', onPaneSymbolChangedForTrendRef);
 
     // Kiểm tra cảnh báo giá mỗi khi có giá mới của bất kỳ pane nào.
     EventBus.on('pane:priceChanged', onPricePotentiallyAlertable);
@@ -121,6 +138,7 @@
     await loadInitialPrice(paneId, pane.symbol);
     await loadHigherTFData(paneId, instance, pane.symbol, pane.timeframe);
     await syncBreakoutConfig(paneId, instance, pane);
+    await setupTrendReference(paneId, pane.symbol); // thêm dòng này
   }
 
   async function onPaneSymbolOrTimeframeChanged({ paneId }) {
@@ -207,6 +225,51 @@
     const instance = paneInstances[paneId];
     if (!instance) return;
     instance.upsertHigherTFCandle(candle);
+  }
+
+  /**
+   * Khởi tạo 1 instance TrendReferenceModule riêng cho pane này và tải dữ
+   * liệu ban đầu cho toàn bộ 7 khung cố định (m5,m15,h1,h2,h4,d1,d3) - xem
+   * TrendReferenceModule.ROLE_INTERVAL trong trend-reference.js.
+   */
+  async function setupTrendReference(paneId, symbol) {
+    const instance = TrendReferenceModule.create(paneId);
+    trendRefInstances[paneId] = instance;
+    await loadTrendReferenceData(paneId, instance, symbol);
+  }
+
+  async function loadTrendReferenceData(paneId, instance, symbol) {
+    closeAllTrendRefKlineSockets(paneId);
+    const roles = Object.keys(TrendReferenceModule.ROLE_INTERVAL);
+
+    await Promise.all(roles.map(async (role) => {
+      const interval = TrendReferenceModule.ROLE_INTERVAL[role];
+      try {
+        const candles = await fetchKlines(symbol, interval, KLINES_LIMIT);
+        instance.setCandles(role, candles);
+      } catch (err) {
+        console.error(`[${paneId}] Lỗi khi tải nến trend tham khảo (${role}):`, err);
+      }
+      connectTrendRefKlineStream(paneId, role, symbol, interval);
+    }));
+  }
+
+  function onTrendRefKlineUpdate({ paneId, role, candle }) {
+    const instance = trendRefInstances[paneId];
+    if (!instance) return;
+    instance.upsertCandle(role, candle);
+  }
+
+  /**
+   * Đổi symbol -> trend tham khảo của pane đó phải tải lại từ đầu (cả 7
+   * khung), vì toàn bộ dữ liệu cũ thuộc symbol cũ không còn dùng được.
+   * KHÔNG áp dụng khi chỉ đổi timeframe của pane (trend tham khảo không phụ
+   * thuộc timeframe đang xem).
+   */
+  async function onPaneSymbolChangedForTrendRef({ paneId, symbol }) {
+    const instance = trendRefInstances[paneId];
+    if (!instance) return;
+    await loadTrendReferenceData(paneId, instance, symbol);
   }
 
   async function loadSLData(paneId, instance, symbol, slTimeframe) {

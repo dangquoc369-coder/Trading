@@ -37,6 +37,10 @@ const IndicatorLegend = (function () {
 
     if (collapsed) return;
 
+    // ĐỢT FIX NÀY: đưa chip BUY/SELL lên ĐẦU danh sách (trước EMA21, EMA200...)
+    // theo yêu cầu người dùng - đây là chỉ báo chính, nên dễ thấy/dễ bấm nhất.
+    container.appendChild(buildBreakoutChip(paneId, instance));
+
     const config = instance.getIndicatorConfig();
     Object.keys(config).forEach((key) => {
       container.appendChild(buildChip(paneId, instance, key, config[key]));
@@ -46,8 +50,6 @@ const IndicatorLegend = (function () {
       instance.setVolumeVisible(next);
       render(paneId, instance);
     }));
-
-    container.appendChild(buildBreakoutChip(paneId, instance));
   }
 
   function buildCollapseToggle(paneId, instance, collapsed) {
